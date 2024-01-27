@@ -7,19 +7,24 @@ rm(list=ls(all=TRUE))
 
 library(tidyverse)
 library(tidymodels)
+library(stacks)
 library(textrecipes)
-
+library(tictoc)
+library(plsmod)
 
 
 #####  CARREGAR OS DADOS  #####
 
 df<- read.csv("heart_attack.csv",header=T)
-#df2<- read.csv("heart_attack2.csv",header=T,sep=";")
-
-#df<- df %>% separate(Blood.Pressure, c("Systolic","Diastolic"), sep="/")
-
 glimpse(df)
 
+df<- df %>% separate(Blood.Pressure, c("Systolic","Diastolic"), sep="/")
+df$Heart.Attack.Risk<- as.factor(df$Heart.Attack.Risk)
+glimpse(df)
+
+df$Systolic<- as.numeric(df$Systolic)
+df$Diastolic<- as.numeric(df$Diastolic)
+glimpse(df)
 
 
 ##### SPLIT TRAIN/TEST/VALIDATION #####
@@ -30,61 +35,46 @@ split<- df %>% initial_split(strata=Heart.Attack.Risk)
 df.train<- training(split)
 df.test<- testing(split)
 
-folds<- vfold_cv(df.train, v=2, repeats=5, strata=Heart.Attack.Risk)
+folds<- vfold_cv(df.train, v=3, strata=Heart.Attack.Risk)
 
 
 
 ##### PRÉ-PROCESSAMENTO #####
 
-recipe<- recipe(Heart.Attack.Risk ~ . , data = df.train) %>%
-  step_clean_names(all_predictors()) %>% 
-  step_clean_levels(all_nominal)
+#recipe<- recipe(Heart.Attack.Risk ~ . , data = df.train) %>%
+  #step_clean_names(all_predictors()) %>% 
+  #step_clean_levels(all_nominal()) %>% 
 
-  
+rec<- recipe(Heart.Attack.Risk ~ . , data = df.train) %>%
+  step_select(-Patient.ID) %>% 
   step_filter_missing(all_predictors(),threshold = 0.4) %>% 
   step_zv(all_predictors()) %>% 
   step_impute_knn(all_predictors()) %>%
   step_novel(all_nominal_predictors()) %>%
   step_normalize(all_numeric_predictors()) %>% 
-  #  step_string2factor(Class,levels=c("Good","Bad")) %>% 
   step_dummy(all_nominal_predictors())
-#step_other(all_nominal_predictors(),threshold = 0.02)
 
-recipe2<- recipe(Class ~ . , data = df.train) %>%
-  step_filter_missing(all_predictors(),threshold = 0.4) %>% 
-  step_zv(all_predictors()) %>% 
-  step_impute_knn(all_predictors()) %>%
-  step_novel(all_nominal_predictors()) %>%
-  step_normalize(all_numeric_predictors()) %>% 
-  step_dummy(all_nominal_predictors()) %>% 
-  step_interact(terms = ~ all_predictors()^2) %>% 
-  step_pls(all_predictors(), outcome="Class", num_comp = tune())
-
-recipe3<- recipe(Class ~ . , data = df.train) %>%
-  step_filter_missing(all_predictors(),threshold = 0.4) %>% 
-  step_zv(all_predictors()) %>% 
-  step_impute_knn(all_predictors()) %>%
-  step_novel(all_nominal_predictors()) %>%
-  step_normalize(all_numeric_predictors()) %>% 
-  step_dummy(all_nominal_predictors()) %>% 
-  step_pls(all_predictors(), outcome="Class", num_comp = 2) %>% 
-  step_interact(terms = ~ all_predictors()^2) %>% 
-  step_spline_b(all_predictors(), deg_free = 10)
+rec.knn<- rec %>% 
+  #step_pls(all_numeric_predictors(),num_comp = tune(),outcome = "Heart.Attack.Risk") 
+  #step_pls(all_numeric_predictors(),num_comp = 2,outcome = "Heart.Attack.Risk") 
+  step_pca(all_numeric_predictors(),num_comp = tune())
 
 
 
 ##### MODELOS #####
 
-fit.log.las<- logistic_reg(penalty = tune(), mixture = 1) %>%
+fit.las<- logistic_reg(penalty = tune(), mixture = 1) %>%
   set_engine("glmnet") %>%
   set_mode("classification")
 
-fit.log.rid<- logistic_reg(penalty = tune(), mixture = 0) %>%
-  set_engine("glmnet") %>%
+fit.knn<- nearest_neighbor(neighbors = tune()) %>% 
+  set_engine("kknn") %>% 
   set_mode("classification")
 
-fit.log.net<- logistic_reg(penalty = tune(), mixture = tune()) %>%
-  set_engine("glmnet") %>%
+fit.dt<- decision_tree(cost_complexity = tune(),
+                       tree_depth = tune(),
+                       min_n = tune()) %>% 
+  set_engine("rpart") %>% 
   set_mode("classification")
 
 
@@ -92,45 +82,23 @@ fit.log.net<- logistic_reg(penalty = tune(), mixture = tune()) %>%
 ##### WORKFLOW #####
 
 wf.las<- workflow() %>%
-  add_recipe(recipe1) %>%
-  add_model(fit.log.las)
+  add_recipe(rec) %>%
+  add_model(fit.las)
 
-wf.rid<- workflow() %>%
-  add_recipe(recipe1) %>%
-  add_model(fit.log.rid)
+wf.knn<- workflow() %>%
+  add_recipe(rec.knn) %>%
+  add_model(fit.knn)
 
-wf.net<- workflow() %>%
-  add_recipe(recipe1) %>%
-  add_model(fit.log.net)
+wf.dt<- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(fit.dt)
 
-wf.las2<- workflow() %>%
-  add_recipe(recipe2) %>%
-  add_model(fit.log.las)
 
-wf.rid2<- workflow() %>%
-  add_recipe(recipe2) %>%
-  add_model(fit.log.rid)
-
-wf.net2<- workflow() %>%
-  add_recipe(recipe2) %>%
-  add_model(fit.log.net)
-
-wf.las3<- workflow() %>%
-  add_recipe(recipe3) %>%
-  add_model(fit.log.las)
-
-wf.rid3<- workflow() %>%
-  add_recipe(recipe3) %>%
-  add_model(fit.log.rid)
-
-wf.net3<- workflow() %>%
-  add_recipe(recipe3) %>%
-  add_model(fit.log.net)
 
 ##### HIPERPARAMETERS TUNING - BAYESIAN SEARCH #####
 
 tic()
-set.seed(1)
+set.seed(0)
 tune.las<- tune_bayes(wf.las,
                       resamples = folds,
                       initial = 10,
@@ -139,132 +107,127 @@ tune.las<- tune_bayes(wf.las,
                       param_info = parameters(penalty(range=c(-10,0)))
 )
 toc()
-# 56.54 sec elapsed
+# 43.72 sec elapsed
 
 
 tic()
-set.seed(1)
-tune.rid<- tune_bayes(wf.rid,
+set.seed(0)
+tune.knn<- tune_bayes(wf.knn,
+                      resamples = folds,
+                      initial = 5,
+                      control = control_stack_bayes(),
+                      metrics = metric_set(roc_auc),
+                      param_info = parameters(num_comp(range=c(1,20)),
+                                              neighbors(range=c(1,40)))
+)
+toc()
+# 92.81 sec elapsed
+
+
+tic()
+set.seed(0)
+tune.dt<- tune_bayes(wf.dt,
                       resamples = folds,
                       initial = 10,
                       control = control_stack_bayes(),
                       metrics = metric_set(roc_auc),
-                      param_info = parameters(penalty(range=c(-10,0)))
+                      param_info = parameters(cost_complexity(range=c(-10,-1)),
+                                              tree_depth(range=c(1,20)),
+                                              min_n(range=c(1,40)))
 )
 toc()
-# 57.77 sec elapsed
+# 92.67 sec elapsed
 
-
-tic()
-set.seed(1)
-tune.net<- tune_bayes(wf.net,
-                      resamples = folds,
-                      initial = 10,
-                      control = control_stack_bayes(),
-                      metrics = metric_set(roc_auc),
-                      param_info = parameters(penalty(range=c(-10,0)),
-                                              mixture(range=c(0,1))
-                      )
-)
-toc()
-# 70.92 sec elapsed
-
-
-tic()
-set.seed(1)
-tune.las2<- tune_bayes(wf.las2,
-                       resamples = folds,
-                       initial = 10,
-                       control = control_stack_bayes(),
-                       metrics = metric_set(roc_auc),
-                       param_info = parameters(penalty(range=c(-10,0)),
-                                               num_comp(range=c(1,50)))
-)
-toc()
-# 626.81 sec elapsed
-
-
-tic()
-set.seed(1)
-tune.rid2<- tune_bayes(wf.rid2,
-                       resamples = folds,
-                       initial = 10,
-                       control = control_stack_bayes(),
-                       metrics = metric_set(roc_auc),
-                       param_info = parameters(penalty(range=c(-10,0)),
-                                               num_comp(range=c(1,50)))
-)
-toc()
-# 504.58 sec elapsed
-
-
-tic()
-set.seed(1)
-tune.net2<- tune_bayes(wf.net2,
-                       resamples = folds,
-                       initial = 10,
-                       control = control_stack_bayes(),
-                       metrics = metric_set(roc_auc),
-                       param_info = parameters(penalty(range=c(-10,0)),
-                                               mixture(range=c(0,1)),
-                                               num_comp(range=c(1,50))
-                       )
-)
-toc()
-# 653.34 sec elapsed
-
-
-tic()
-set.seed(1)
-tune.las3<- tune_bayes(wf.las3,
-                       resamples = folds,
-                       initial = 10,
-                       control = control_stack_bayes(),
-                       metrics = metric_set(roc_auc),
-                       param_info = parameters(penalty(range=c(-10,0)))
-)
-toc()
-# 297.92 sec elapsed
-
-
-tic()
-set.seed(1)
-tune.rid3<- tune_bayes(wf.rid3,
-                       resamples = folds,
-                       initial = 10,
-                       control = control_stack_bayes(),
-                       metrics = metric_set(roc_auc),
-                       param_info = parameters(penalty(range=c(-10,0)))
-)
-toc()
-# 283.2 sec elapsed
-
-
-tic()
-set.seed(1)
-tune.net3<- tune_bayes(wf.net3,
-                       resamples = folds,
-                       initial = 10,
-                       control = control_stack_bayes(),
-                       metrics = metric_set(roc_auc),
-                       param_info = parameters(penalty(range=c(-10,0)),
-                                               mixture(range=c(0,1)))
-)
-toc()
-# 400.29 sec elapsed
 
 
 
 ## ESCOLHENDO O MELHOR (BEST roc_auc)
 
 show_best(tune.las,n=3)
-show_best(tune.rid,n=3)
-show_best(tune.net,n=3)
-show_best(tune.las2,n=3)
-show_best(tune.rid2,n=3)
-show_best(tune.net2,n=3)
-show_best(tune.las3,n=3)
-show_best(tune.rid3,n=3)
-show_best(tune.net3,n=3)
+show_best(tune.knn,n=3)
+show_best(tune.dt,n=3)
 
+
+
+##### TUNED WORKFLOW #####
+
+wf.las<- wf.las %>% 
+  finalize_workflow(select_best(tune.las)) %>% 
+  fit(df.train)
+
+wf.knn<- wf.knn %>% 
+  finalize_workflow(select_best(tune.knn)) %>% 
+  fit(df.train)
+
+wf.dt<- wf.dt %>% 
+  finalize_workflow(select_best(tune.dt)) %>% 
+  fit(df.train)
+
+
+
+######################################################
+#####  ESCOLHENDO O PONTO DE CORTE - SENS/ESPEC  #####
+######################################################
+
+# RESPOSTA VS PROBABILIDADE
+
+prob.test<- wf.las %>% predict(df.test, type="prob")
+df.prob<- cbind.data.frame(df.test$Heart.Attack.Risk, prob.test[,2])
+colnames(df.prob)<- c("Heart.Attack.Risk", "prob")
+
+df.prob %>% head()
+
+
+# CORTE
+
+cut<- df.prob %>% cutpointr(prob, Heart.Attack.Risk,
+                            method=maximize_metric,
+                            metric=sum_sens_spec)
+
+#cut<- df.prob %>% cutpointr(prob, Class,
+#                            method=minimize_metric,
+#                            metric=abs_d_sens_spec)
+
+#cut<- df.prob %>% cutpointr(prob, Class,
+#                            method=maximize_metric,
+#                            metric=spec_constrain,
+#                            min_constrain = 0.75)
+
+cut %>% summary()
+cut %>% plot_roc()
+
+opt_cut<- cut$optimal_cutpoint
+
+pred<- cut %>% predict(newdata=df.prob)
+
+df.prob<- cbind.data.frame(df.prob, pred)
+
+df.prob %>% head()
+
+
+
+
+#####  VERIFICANDO MEDIDAS DE CLASSIFICAÇÃO  #####
+
+df.prob %>% conf_mat(Class, pred)
+df.prob %>% conf_mat(Class, pred) %>% autoplot(type="heatmap")
+df.prob %>% conf_mat(Class, pred) %>% summary()
+
+
+
+
+############################
+### FINALIZANDO O MODELO ###
+############################
+
+wf.final<- fit(wf.best, df)
+
+
+
+###############################
+### SALVANDO O MODELO FINAL ###
+###############################
+
+saveRDS(wf.final,"C:/Users/user/Desktop/pasta1/wf_german_credit.rds")
+saveRDS(opt_cut,"C:/Users/user/Desktop/pasta1/ponto_corte.rds")
 
