@@ -14,42 +14,73 @@ library(glmtoolbox)   	# glm graphics
 library(tidyverse)	# manipulacao de dados
 library(ecostats)   	# envelope
 library(hnp)  		# envelope versao 2
+library(tictoc)
 
 
+#####  CARREGAR OS DADOS  #####
 
-## DATA ##
-
-df<- read.csv("C:/Users/lcex/Desktop/asthma.csv", header=TRUE) %>% data.frame()
+df<- read.csv("heart_attack.csv",header=T)
 glimpse(df)
 
-df$gender<- as.factor(df$gender)
-df$res_inf<- as.factor(df$res_inf)
-
+df<- df %>% separate(Blood.Pressure, c("Systolic","Diastolic"), sep="/")
+df$Heart.Attack.Risk<- as.factor(df$Heart.Attack.Risk)
+df<- df %>% select(-Patient.ID)
 glimpse(df)
+
+df$Systolic<- as.numeric(df$Systolic)
+df$Diastolic<- as.numeric(df$Diastolic)
+glimpse(df)
+
 
 
 
 ## GAPHICS/CORRELATION ##
 
-ggpairs(df, columns = 3:4, ggplot2::aes(colour=gender))
-ggpairs(df, columns = 3:4, ggplot2::aes(colour=res_inf))
+#ggpairs(df, columns = 3:4, ggplot2::aes(colour=gender))
+#ggpairs(df, columns = 3:4, ggplot2::aes(colour=res_inf))
 
 
 
-####################
-## MODELO POISSON ##
-####################
+##############
+## MODELO 1 ##
+##############
 
-model_po<- glm(attack ~ . , family = poisson(link="log"), data=df)
-model_po %>% summary()
+model_all<- glm(Heart.Attack.Risk ~ . , family = binomial(link="logit"), data=df)
+model_all %>% summary()
 
 
 
-## VARIABLE SELECTION ##
+##############
+## MODELO 2 ##
+##############
 
-model_po<- stepAIC(model_po, direction = "both")
-model_po %>% summary()
+## VARIABLE SELECTION - STEP ##
 
+model_step<- stepAIC(model_all, direction = "both")
+model_step %>% summary()
+
+
+
+##############
+## MODELO 3 ##
+##############
+
+## VARIABLE SELECTION - ALL REGRESSIONS ##
+
+tic()
+opt_model_all_reg<- glmulti(Heart.Attack.Risk ~ . ,
+                            data = df,
+                            crit = aic, # aic, aicc, bic, bicc
+                            level = 1, # 1 sem interacoes, 2 com
+                            method = "h", # "d", ou "h", ou "g"
+                            family = binomial,
+                            fitfunction = glm, # tipo de modelo (lm, glm, etc)
+                            confsetsize = 100 # guarde os melhores 100
+)
+tictoc()
+# 
+
+opt_model_all_reg
 
 
 
