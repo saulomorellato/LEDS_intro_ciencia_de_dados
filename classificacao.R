@@ -9,7 +9,9 @@ library(tidyverse)
 library(tidymodels)
 library(stacks)
 library(textrecipes)
+library(cutpointr)
 library(tictoc)
+library(caret)
 library(plsmod)
 
 
@@ -20,6 +22,7 @@ glimpse(df)
 
 df<- df %>% separate(Blood.Pressure, c("Systolic","Diastolic"), sep="/")
 df$Heart.Attack.Risk<- as.factor(df$Heart.Attack.Risk)
+df<- df %>% select(-Patient.ID)
 glimpse(df)
 
 df$Systolic<- as.numeric(df$Systolic)
@@ -46,7 +49,6 @@ folds<- vfold_cv(df.train, v=3, strata=Heart.Attack.Risk)
   #step_clean_levels(all_nominal()) %>% 
 
 rec<- recipe(Heart.Attack.Risk ~ . , data = df.train) %>%
-  step_select(-Patient.ID) %>% 
   step_filter_missing(all_predictors(),threshold = 0.4) %>% 
   step_zv(all_predictors()) %>% 
   step_impute_knn(all_predictors()) %>%
@@ -171,7 +173,7 @@ wf.dt<- wf.dt %>%
 
 # RESPOSTA VS PROBABILIDADE
 
-prob.test<- wf.las %>% predict(df.test, type="prob")
+prob.test<- wf.dt %>% predict(df.test, type="prob")
 df.prob<- cbind.data.frame(df.test$Heart.Attack.Risk, prob.test[,2])
 colnames(df.prob)<- c("Heart.Attack.Risk", "prob")
 
@@ -182,16 +184,22 @@ df.prob %>% head()
 
 cut<- df.prob %>% cutpointr(prob, Heart.Attack.Risk,
                             method=maximize_metric,
-                            metric=sum_sens_spec)
+                            metric=sum_sens_spec,
+                            pos_class="1",
+                            direction=">=")
 
-#cut<- df.prob %>% cutpointr(prob, Class,
-#                            method=minimize_metric,
-#                            metric=abs_d_sens_spec)
+cut<- df.prob %>% cutpointr(prob, Heart.Attack.Risk,
+                            method=minimize_metric,
+                            metric=abs_d_sens_spec,
+                            pos_class="1",
+                            direction=">=")
 
-#cut<- df.prob %>% cutpointr(prob, Class,
+#cut<- df.prob %>% cutpointr(prob, Heart.Attack.Risk,
 #                            method=maximize_metric,
 #                            metric=spec_constrain,
-#                            min_constrain = 0.75)
+#                            min_constrain = 0.75,
+#                            pos_class="1",
+#                            direction=">=")
 
 cut %>% summary()
 cut %>% plot_roc()
@@ -209,9 +217,9 @@ df.prob %>% head()
 
 #####  VERIFICANDO MEDIDAS DE CLASSIFICAÇÃO  #####
 
-df.prob %>% conf_mat(Class, pred)
-df.prob %>% conf_mat(Class, pred) %>% autoplot(type="heatmap")
-df.prob %>% conf_mat(Class, pred) %>% summary()
+df.prob %>% conf_mat(Heart.Attack.Risk, pred)
+df.prob %>% conf_mat(Heart.Attack.Risk, pred) %>% autoplot(type="heatmap")
+df.prob %>% conf_mat(Heart.Attack.Risk, pred) %>% summary()
 
 
 
