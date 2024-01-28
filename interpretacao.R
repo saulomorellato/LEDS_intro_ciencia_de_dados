@@ -56,7 +56,11 @@ model_all %>% summary()
 
 ## VARIABLE SELECTION - STEP ##
 
+tic()
 model_step<- stepAIC(model_all, direction = "both")
+toc()
+# 39.3 sec elapsed
+
 model_step %>% summary()
 
 
@@ -68,63 +72,32 @@ model_step %>% summary()
 ## VARIABLE SELECTION - ALL REGRESSIONS ##
 
 tic()
+set.seed(0)
 opt_model_all_reg<- glmulti(Heart.Attack.Risk ~ . ,
                             data = df,
                             crit = aic, # aic, aicc, bic, bicc
+                            #level = 1, # 1 sem interacoes, 2 com
+                            #method = "h", # "d", ou "h", ou "g"
                             level = 1, # 1 sem interacoes, 2 com
-                            method = "h", # "d", ou "h", ou "g"
+                            method = "g", # "d", ou "h", ou "g"
                             family = binomial,
                             fitfunction = glm, # tipo de modelo (lm, glm, etc)
                             confsetsize = 100 # guarde os melhores 100
 )
-tictoc()
-# 
+toc()
+# 890.36 sec elapsed
 
-opt_model_all_reg
+formula_bestmodel<- summary(opt_model_all_reg)$bestmodel
+model_all_reg<- glm(formula_bestmodel, family = binomial(link="logit"), data=df)
 
-
-
-##############################
-## MODELO BINOMIAL NEGATIVO ##
-##############################
-
-model_nb<- glm.nb(attack ~ . , data=df)
-model_nb %>% summary()
-
-
-
-## VARIABLE SELECTION ##
-
-model_nb<- stepAIC(model_nb, direction = "both")
-model_nb %>% summary()
-
-
-
-
-## ESCOLHENDO ENTRE POISSON E BINOMIAL NEGATIVA ##
-
-aic<- cbind.data.frame(AIC(model_po),AIC(model_nb))
-colnames(aic)<- c("Poisson","Negative Binomial")
-aic
-
-par(mfrow=c(1,2))
-plotenvelope(model_po, which=2, n.sim=1000,
-             xlab="Resíduos Simulados",
-             ylab="Resíduos Observados",
-             main="")
-plotenvelope(model_nb, which=2, n.sim=1000,
-             xlab="Resíduos Simulados",
-             ylab="Resíduos Observados",
-             main="")
-par(mfrow=c(1,1))
+model_all_reg %>% summary()
 
 
 
 ### PREPARANDO OS GRÁFICOS ###
 
 # escolha o "melhor"
-model<- model_po
-model<- model_nb
+model<- model_step
 
 n<- nrow(df)    		# número de observações
 k<- length(model$coef) 		# k=p+1 (número de coeficientes)
