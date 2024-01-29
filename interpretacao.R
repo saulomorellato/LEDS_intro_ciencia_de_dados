@@ -14,7 +14,10 @@ library(glmtoolbox)   	# glm graphics
 library(tidyverse)	# manipulacao de dados
 library(ecostats)   	# envelope
 library(hnp)  		# envelope versao 2
-library(tictoc)
+library(tictoc)   # medir tempo de execução
+library(gtsummary)	# tabelas
+library(report)		# reportar resultados
+
 
 
 #####  CARREGAR OS DADOS  #####
@@ -181,3 +184,23 @@ df.env2 %>% ggplot(aes(x=x,y=y)) +
   xlab("Resíduos Simulados") + 
   ylab("Resíduos Observados") + 
   theme_bw()
+
+
+
+###########################
+## REPORTANDO RESULTADOS ##
+###########################
+
+# TABELAS
+
+model %>%  tbl_regression(exponentiate = TRUE,
+                          estimate_fun = function(x) style_ratio(x, digits = 6))
+
+model %>%  tbl_regression(estimate_fun = function(x) style_sigfig(x, digits = 6))
+
+
+# RELATÓRIO
+
+model %>% report()
+
+model %>% report() %>% summary()
